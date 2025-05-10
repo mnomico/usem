@@ -58,7 +58,8 @@ int main(int argc, char *argv[]) {
                     getchar();
                     desbloquear_sem(semset_id, INI);
                     break;
-        case 'e':   zero_espera_sem(semset_id, INI);
+        case 'e':   abrir_sem(&semset_id, clave);
+					zero_espera_sem(semset_id, INI);
                     break;
         case 'b':   abrir_sem(&semset_id, clave);
                     remover_sem(semset_id);
@@ -115,8 +116,8 @@ void bloquear_sem(int sid, int idx) {
 }
 
 void zero_espera_sem(int sid, int idx) {
-    struct sembuf esperazero={ 0, 0, SEM_UNDO};
-    esperazero.sem_num = idx;
+    struct sembuf wait_for_zero = { idx, 0, SEM_UNDO };  // Wait until sem = 0 (locked)
+    struct sembuf wait_for_one  = { idx, 0, IPC_NOWAIT }; // Check if sem > 0 (unlocked)
     printf("Proceso a la ESPERA de valor CERO en semáforo IPC...\n");
 
     int valor = semctl(sid, idx, GETVAL);
@@ -126,17 +127,27 @@ void zero_espera_sem(int sid, int idx) {
     }
     printf("Valor del semáforo antes de esperar: %d\n", valor);
 
-    if (semop(sid, &esperazero, 1) == -1) {
-        perror("Error en semop");
-        fprintf(stderr, "errno: %d\n", errno);
+   // STEP 1: Wait until semaphore is locked (0)
+    if (semop(sid, &wait_for_zero, 1) == -1) {
+        perror("Error esperando a que el semáforo sea bloqueado");
         exit(1);
+    }
+    
+    printf("Semáforo bloqueado (valor = 0). Esperando liberación...\n");
+
+    // STEP 2: Poll until semaphore is unlocked (1)
+    while (1) {
+        int val = semctl(sid, idx, GETVAL);
+        if (val == -1) {
+            perror("Error obteniendo valor del semáforo");
+            exit(1);
+        }
+        if (val > 0) {
+            break;  // Semaphore unlocked!
+        }
+        usleep(100000); // Sleep 100ms to avoid busy-waiting
     }
 
-    if((semop(sid, &esperazero, 1)) == -1) {
-        fprintf(stderr, "La Espera NO pudo establecerse \n");
-        fprintf(stderr, "Valor de ERRNO : %d \n", errno);
-        exit(1);
-    }
     printf("ESPERA concluída. Terminación del proceso.\n");
 }
 
